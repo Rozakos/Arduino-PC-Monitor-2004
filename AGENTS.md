@@ -27,9 +27,18 @@ size report — this is the binding constraint.
 ## Hard constraints (ATmega168P = default target)
 
 - **14336 B flash, 1024 B SRAM.** Build fails the link if either is exceeded.
-- Current usage ≈ 10.9 KB flash / 794 B static RAM. The remaining RAM is shared
-  by the heap (4 `new` LCD objects, ~70 B) and the stack, so **static RAM is
-  the scarce resource** — be very conservative adding globals/buffers.
+- Current usage ≈ 11.3 KB flash / **746 B** static RAM. The remaining RAM is
+  shared by the heap (`new` LCD objects) and the stack, so **static RAM is the
+  scarce resource** — be very conservative adding globals/buffers.
+- **The link succeeding is NOT enough.** This firmware once linked fine at
+  **794 B** static but **hung during `LiquidCrystal_I2C::init()`** (boot reached
+  `BOOT` but never `FOUND_LCD`/`READY`) — a runtime **stack/heap collision**:
+  with an LCD present, `init()`'s call stack peaked and overran the heap. The
+  fix was freeing ~48 B by shrinking the serial **TX** ring to 16 via
+  `build_flags = -DSERIAL_TX_BUFFER_SIZE=16` in `platformio.ini` (`[env]`).
+  **Symptom to recognise:** boots clean with the LCD *unplugged* (reaches
+  `READY`) but hangs after `BOOT` with it plugged in → you're out of RAM, not
+  broken on the bus. Keep a healthy static-RAM margin (target ≤ ~760 B).
 
 ### Rules that keep it fitting — do not casually break these
 
@@ -73,9 +82,14 @@ If you genuinely need more room, the cheapest lever is lowering `MAX_LCDS`.
 
 ## Key behaviors / gotchas
 
-- **Custom character slots:** `0–5` = segmented bar cells (left/mid/right ×
-  full/empty), `6` = degree symbol (`#define DEG 6`). 8 slots exist; don't
-  exceed.
+- **Custom character slots:** `1–6` = segmented bar cells (left/mid/right ×
+  full/empty), `7` = degree symbol (`#define DEG 7`). **Slot 0 is deliberately
+  unused.** 8 slots exist (0–7); don't exceed. (Slot 0 was suspected during the
+  boot-hang debugging and avoided; the real cause turned out to be RAM, but the
+  1..7 layout was kept.)
+- **I²C robustness:** `i2cBusRecover()` runs before `Wire.begin()` to clock out
+  a slave stuck holding SDA; `Wire.setWireTimeout(25000, true)` ensures a wedged
+  bus can never hard-hang the scan. Keep both.
 - **`findField` is boundary-aware:** a key matches only at string start or right
   after `;`, and must be followed by `=`. This is load-bearing — it stops `RAM`
   matching inside `VRAM`/`RAMU`/`RAMT`, and `PG` matching inside `PGORD`. Keep
@@ -112,3 +126,8 @@ See [README.md](README.md) for the full field table.
    `drawSmoothBar` name.
 4. Put on a "diet" to fit the ATmega168P: removed `printf`/`scanf`, hand-rolled
    parse + format, in-place line parsing, stripped debug output.
+5. Segmented bars (7 custom chars) then linked fine but **hung at boot on the
+   168P** — a runtime stack/heap collision at ~794 B static RAM, not a bar bug.
+   Diagnosed by: clean boot with LCD unplugged vs. hang with it plugged in.
+   Fixed by adding `i2cBusRecover()` + `Wire.setWireTimeout()` (bus safety) and,
+   the actual fix, `-DSERIAL_TX_BUFFER_SIZE=16` to free ~48 B (→ 746 B static).

@@ -47,8 +47,10 @@
 #define PG_NET  3
 
 // ── Custom char slots ───────────────────────────────────────────────────────--
-//   Slots 0..5 = segmented bar cells (L/M/R, full/empty).  Slot 6 = degree.
-#define DEG     6
+//   Slots 1..6 = segmented bar cells (L/M/R, full/empty).  Slot 7 = degree.
+//   (Slot 0 deliberately unused — registering a char on slot 0 during init
+//    wedged the LCD and hung the boot; slots 1..7 are safe.)
+#define DEG     7
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
 #define BAUD                 115200
@@ -114,6 +116,24 @@ bool     ledState     = false;
 //  I2C SCAN & LCD INIT
 // ════════════════════════════════════════════════════════════════════════════
 
+// Free a wedged I2C bus: if a slave is holding SDA low, clock SCL up to 9
+// times to let it finish its byte, then issue a STOP. Run BEFORE Wire.begin().
+void i2cBusRecover() {
+  pinMode(SDA, INPUT_PULLUP);
+  pinMode(SCL, INPUT_PULLUP);
+  delayMicroseconds(10);
+  if (digitalRead(SDA) == HIGH) return;          // bus already free
+
+  for (uint8_t i = 0; i < 9 && digitalRead(SDA) == LOW; i++) {
+    pinMode(SCL, OUTPUT); digitalWrite(SCL, LOW); delayMicroseconds(5);
+    pinMode(SCL, INPUT_PULLUP);                   delayMicroseconds(5);
+  }
+  // STOP condition: SDA low -> high while SCL high
+  pinMode(SDA, OUTPUT); digitalWrite(SDA, LOW); delayMicroseconds(5);
+  pinMode(SCL, INPUT_PULLUP);                   delayMicroseconds(5);
+  pinMode(SDA, INPUT_PULLUP);                   delayMicroseconds(5);
+}
+
 bool probeAddress(uint8_t addr) {
   Wire.beginTransmission(addr);
   return (Wire.endTransmission() == 0);
@@ -128,7 +148,7 @@ void scanAndInitLcds() {
   byte cRF[8] = { 0b11110,0b11111,0b11111,0b11111,0b11111,0b11111,0b11110,0b00000 };
   byte cRE[8] = { 0b11110,0b00001,0b00001,0b00001,0b00001,0b00001,0b11110,0b00000 };
 
-  // Degree symbol (slot 6)
+  // Degree symbol (slot 7)
   byte cDegree[8] = {
     0b00110,0b01001,0b01001,0b00110,0b00000,0b00000,0b00000,0b00000
   };
@@ -150,12 +170,12 @@ void scanAndInitLcds() {
     lcds[numLcds]->init();
     lcds[numLcds]->backlight();
 
-    lcds[numLcds]->createChar(0, cLF);
-    lcds[numLcds]->createChar(1, cLE);
-    lcds[numLcds]->createChar(2, cMF);
-    lcds[numLcds]->createChar(3, cME);
-    lcds[numLcds]->createChar(4, cRF);
-    lcds[numLcds]->createChar(5, cRE);
+    lcds[numLcds]->createChar(1, cLF);
+    lcds[numLcds]->createChar(2, cLE);
+    lcds[numLcds]->createChar(3, cMF);
+    lcds[numLcds]->createChar(4, cME);
+    lcds[numLcds]->createChar(5, cRF);
+    lcds[numLcds]->createChar(6, cRE);
     lcds[numLcds]->createChar(DEG, cDegree);
     lcds[numLcds]->clear();
 
@@ -252,7 +272,7 @@ long getLong(const char* s, const char* key, long def) {
 
 
 // ════════════════════════════════════════════════════════════════════════════
-//  BAR DRAWING — segmented cells with rounded ends
+//  BAR DRAWING — segmented cells with rounded ends (slots 1..6, slot 0 unused)
 // ════════════════════════════════════════════════════════════════════════════
 
 void drawSmoothBar(LiquidCrystal_I2C* lcd, uint8_t row, uint8_t col,
@@ -262,9 +282,9 @@ void drawSmoothBar(LiquidCrystal_I2C* lcd, uint8_t row, uint8_t col,
   lcd->setCursor(col, row);
   for (int i = 0; i < width; i++) {
     bool f = (i < filled);
-    if      (i == 0)         lcd->write(byte(f ? 0 : 1));   // left end
-    else if (i == width - 1) lcd->write(byte(f ? 4 : 5));   // right end
-    else                     lcd->write(byte(f ? 2 : 3));   // middle
+    if      (i == 0)         lcd->write(byte(f ? 1 : 2));   // left end
+    else if (i == width - 1) lcd->write(byte(f ? 5 : 6));   // right end
+    else                     lcd->write(byte(f ? 3 : 4));   // middle
   }
 }
 
@@ -532,7 +552,9 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   Serial.begin(BAUD);
   Serial.println(F("BOOT"));
+  i2cBusRecover();                  // unstick a wedged bus before using Wire
   Wire.begin();
+  Wire.setWireTimeout(25000, true); // 25 ms timeout, reset TWI on timeout — never hard-hang
   scanAndInitLcds();
   rebuildEnabledPages(DEFAULT_PAGE_MASK);
 

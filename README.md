@@ -76,12 +76,20 @@ The 168P is tight (1 KB SRAM, 14 KB usable flash). Current usage:
 
 | Target | Flash | SRAM (static) |
 |--------|-------|---------------|
-| ATmega168P | ~10.9 KB / 14 KB (76%) | ~794 B / 1024 B (78%) |
-| ATmega328P | ~10.9 KB / 30 KB (35%) | ~794 B / 2048 B (38%) |
+| ATmega168P | ~11.3 KB / 14 KB (79%) | ~746 B / 1024 B (73%) |
+| ATmega328P | ~11.3 KB / 30 KB (37%) | ~746 B / 2048 B (36%) |
 
-The ~230 B of free RAM on the 168P is shared between the heap (4 LCD objects,
-~70 B) and the stack. If you run 4 displays and hit instability, lower
-`MAX_LCDS` or move those units to a 328P.
+The free RAM on the 168P is shared between the heap (LCD objects) and the
+stack. To keep it stable the serial TX buffer is shrunk to 16 B via
+`build_flags` (we only send short status tokens) — see [platformio.ini](platformio.ini).
+
+> **Troubleshooting — boots but the LCD stays blank, serial shows `BOOT` then
+> nothing (no `READY`):** that's the 168P running out of RAM during LCD init
+> (a stack/heap collision). Tell-tale: unplug the LCD and it reaches `READY`
+> fine. Free SRAM (e.g. keep the TX-buffer flag, lower `MAX_LCDS`, drop a custom
+> char) or move to a 328P. A genuinely *wedged I²C bus* (e.g. after a reset mid-
+> transaction) shows the same blank screen; a full power-cycle of the LCD clears
+> it, and `i2cBusRecover()` + the `Wire` timeout guard against it in firmware.
 
 ## Serial protocol
 

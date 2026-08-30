@@ -65,6 +65,32 @@ pipeline {
                          onlyIfSuccessful: true
       }
     }
+
+    // Publishing happens ONLY on a tag build. Multibranch creates a separate job
+    // per discovered tag and sets TAG_NAME there, so buildingTag() is exact -
+    // unlike checking whether HEAD carries a tag, which also fires on the main
+    // job whenever main's head is the tagged commit.
+    stage('Publish GitHub Release') {
+      when { buildingTag() }
+      steps {
+        withCredentials([string(credentialsId: 'github-pat', variable: 'GH_TOKEN')]) {
+          sh '''
+            set -eu
+            # one hex per board - all three are published so a flash can pick
+            # the right Nano variant without rebuilding
+            for e in nanoatmega168 nanoatmega328 nanoatmega328new; do
+              cp ".pio/build/$e/firmware.hex" "pc-monitor-${e}-${TAG_NAME}.hex"
+            done
+            python3 scripts/publish_release.py \
+              --repo Rozakos/Arduino-PC-Monitor-2004 \
+              --tag "${TAG_NAME}" \
+              --asset "pc-monitor-nanoatmega168-${TAG_NAME}.hex" \
+              --asset "pc-monitor-nanoatmega328-${TAG_NAME}.hex" \
+              --asset "pc-monitor-nanoatmega328new-${TAG_NAME}.hex"
+          '''
+        }
+      }
+    }
   }
 
   post {

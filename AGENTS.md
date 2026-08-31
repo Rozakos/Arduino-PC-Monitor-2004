@@ -131,3 +131,40 @@ See [README.md](README.md) for the full field table.
    Diagnosed by: clean boot with LCD unplugged vs. hang with it plugged in.
    Fixed by adding `i2cBusRecover()` + `Wire.setWireTimeout()` (bus safety) and,
    the actual fix, `-DSERIAL_TX_BUFFER_SIZE=16` to free ~48 B (→ 746 B static).
+
+## CI (self-hosted Jenkins)
+
+`https://jenkins.rozakos.eu` — job **`Arduino-PC-Monitor-2004-MB`**, a *multibranch* pipeline defined
+by the `Jenkinsfile` in this repo. Every push to `main` builds all three board targets in separate stages, so a failure names the board. `platformio.ini` sets `default_envs = nanoatmega168`, so a bare `pio run` builds one board and silently skips the other two. Triggered by
+a GitHub webhook through a Cloudflare Tunnel, with a 5-minute rescan as a fallback.
+
+### Releasing
+
+Push a `v*` tag and CI publishes a GitHub Release with **three** `.hex` files, one per Nano variant attached:
+
+```bash
+git tag -a v1.2.0 -m "v1.2.0"
+git push origin v1.2.0          # tags do NOT go with a plain `git push`
+```
+
+`scripts/publish_release.py` does the upload. It is idempotent — rebuilding an
+already-released tag reuses the release and replaces the asset rather than
+failing.
+
+### Things that will trip you up
+
+- **The 168P is the target that constrains everything.** It currently links at
+  746 of its 1024 bytes of SRAM (72.9%) and 11,288 of 14,336 bytes of flash
+  (78.7%); the same code on a 328P sits at 36% of both. On AVR, SRAM is what
+  bites at *runtime* rather than link time — an image that links can still fail
+  once the stack meets the heap — so the pipeline prints PlatformIO's `RAM:`
+  line for every board on every build.
+- **A tag is a snapshot.** Rebuilding an old tag runs the `Jenkinsfile` *from that
+  commit*, not the current one. Tags predating a pipeline fix will keep failing,
+  and that is correct.
+- **Multibranch is required, not a preference.** Jenkins polls with
+  `git ls-remote -h`, which lists heads only and cannot see tags at all — a plain
+  pipeline-from-SCM job never notices a pushed tag whatever its branch specs say.
+- **Build strategies are a whitelist.** If you edit them in the Jenkins UI, keep
+  *both* the tag and branch strategies; configuring only tags silently stops
+  `main` building.
